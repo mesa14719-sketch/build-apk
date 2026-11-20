@@ -1,0 +1,65 @@
+name: Build APK
+on:
+  repository_dispatch:
+    types: [build-apk]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: اقرأ المدخلات
+        id: cfg
+        run: |
+          APP_NAME="${{ github.event.client_payload.app_name }}"
+          HAS_ICON="${{ github.event.client_payload.has_icon }}"
+          [ -z "$APP_NAME" ] && APP_NAME="MyApp"
+          [ -z "$HAS_ICON" ] && HAS_ICON="false"
+          SAFE_NAME=$(echo "$APP_NAME" | tr -cd 'A-Za-z0-9')
+          [ -z "$SAFE_NAME" ] && SAFE_NAME="MyApp"
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_OUTPUT
+          echo "HAS_ICON=$HAS_ICON" >> $GITHUB_OUTPUT
+      - name: تحضير
+        run: |
+          mkdir -p www
+          if [ -f input/project.zip ]; then
+            unzip -o input/project.zip -d www/
+          elif [ -f index.html ]; then
+            cp index.html www/index.html
+          else
+            echo "لا يوجد مصدر"; exit 1
+          fi
+          test -f www/index.html || exit 1
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/setup-java@v4
+        with: { distribution: 'temurin', java-version: '21' }
+      - uses: android-actions/setup-android@v3
+        with: { packages: 'platform-tools platforms;android-35 build-tools;35.0.0' }
+      - name: بناء
+        run: |
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npx cap init "${{ steps.cfg.outputs.SAFE_NAME }}" "com.example.${{ steps.cfg.outputs.SAFE_NAME }}" --web-dir=www
+          npx cap add android
+          npx cap sync android
+          cd android
+          cat >> variables.gradle <<'EOF'
+          ext { minSdkVersion = 23; compileSdkVersion = 35; targetSdkVersion = 35 }
+          EOF
+          if [ "${{ steps.cfg.outputs.HAS_ICON }}" = "true" ] && [ -f "../input/icon.png" ]; then
+            find app/src/main/res -name "ic_launcher*.png" -exec cp ../input/icon.png {} \;
+          fi
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: نسخ APK
+        run: |
+          mkdir -p output
+          cp android/app/build/outputs/apk/debug/app-debug.apk "output/${{ steps.cfg.outputs.SAFE_NAME }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.cfg.outputs.SAFE_NAME }}-apk
+          path: output/
