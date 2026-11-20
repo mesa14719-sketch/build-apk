@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: اقرأ المدخلات
+
+      - name: قراءة المدخلات
         id: cfg
         run: |
           APP_NAME="${{ github.event.client_payload.app_name }}"
@@ -22,44 +23,72 @@ jobs:
           echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
           echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_OUTPUT
           echo "HAS_ICON=$HAS_ICON" >> $GITHUB_OUTPUT
-      - name: تحضير
+
+      - name: تحضير المشروع
         run: |
           mkdir -p www
           if [ -f input/project.zip ]; then
             unzip -o input/project.zip -d www/
+            count=$(ls -1 www | wc -l)
+            if [ "$count" -eq 1 ] && [ -d "www/$(ls -1 www | head -1)" ]; then
+              inner=$(ls -1 www | head -1)
+              mv www/$inner/* www/ 2>/dev/null || true
+              mv www/$inner/.* www/ 2>/dev/null || true
+              rmdir www/$inner 2>/dev/null || true
+            fi
           elif [ -f index.html ]; then
             cp index.html www/index.html
           else
-            echo "لا يوجد مصدر"; exit 1
+            echo "لا يوجد project.zip ولا index.html"; exit 1
           fi
-          test -f www/index.html || exit 1
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - uses: actions/setup-java@v4
-        with: { distribution: 'temurin', java-version: '21' }
-      - uses: android-actions/setup-android@v3
-        with: { packages: 'platform-tools platforms;android-35 build-tools;35.0.0' }
-      - name: بناء
+          test -f www/index.html || { echo "www/index.html مفقود"; exit 1; }
+          ls -la www/ | head -20
+
+      - name: إعداد Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: إعداد Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: إعداد Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: بناء APK
         run: |
           npm init -y
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap init "${{ steps.cfg.outputs.SAFE_NAME }}" "com.example.${{ steps.cfg.outputs.SAFE_NAME }}" --web-dir=www
           npx cap add android
           npx cap sync android
+
           cd android
-          cat >> variables.gradle <<'EOF'
-          ext { minSdkVersion = 23; compileSdkVersion = 35; targetSdkVersion = 35 }
-          EOF
+          sed -i 's/minSdkVersion = .*/minSdkVersion = 23/' variables.gradle
+          sed -i 's/compileSdkVersion = .*/compileSdkVersion = 35/' variables.gradle
+          sed -i 's/targetSdkVersion = .*/targetSdkVersion = 35/' variables.gradle
+
           if [ "${{ steps.cfg.outputs.HAS_ICON }}" = "true" ] && [ -f "../input/icon.png" ]; then
             find app/src/main/res -name "ic_launcher*.png" -exec cp ../input/icon.png {} \;
           fi
+
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
+
       - name: نسخ APK
         run: |
           mkdir -p output
           cp android/app/build/outputs/apk/debug/app-debug.apk "output/${{ steps.cfg.outputs.SAFE_NAME }}.apk"
-      - uses: actions/upload-artifact@v4
+          ls -lh output/
+
+      - name: رفع APK
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.cfg.outputs.SAFE_NAME }}-apk
           path: output/
+          retention-days: 7
