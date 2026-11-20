@@ -3,6 +3,7 @@ name: Build APK from Uploaded Project
 on:
   repository_dispatch:
     types: [build-apk]
+  workflow_dispatch:   # للتشخيص اليدوي
 
 permissions:
   contents: write
@@ -15,24 +16,39 @@ jobs:
         with:
           ref: main
 
-      - name: قراءة المدخلات
+      - name: قراءة المدخلات والتحقق
         id: cfg
         run: |
-          echo "APP_NAME=${{ github.event.client_payload.app_name }}" >> $GITHUB_OUTPUT
-          echo "HAS_ICON=${{ github.event.client_payload.has_icon }}" >> $GITHUB_OUTPUT
+          APP_NAME="${{ github.event.client_payload.app_name }}"
+          HAS_ICON="${{ github.event.client_payload.has_icon }}"
+          [ -z "$APP_NAME" ] && APP_NAME="MyApp"
+          [ -z "$HAS_ICON" ] && HAS_ICON="false"
+          # تأكد أن الاسم ASCII فقط لـ cap init
+          SAFE_NAME=$(echo "$APP_NAME" | tr -cd 'A-Za-z0-9')
+          [ -z "$SAFE_NAME" ] && SAFE_NAME="MyApp"
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_OUTPUT
+          echo "HAS_ICON=$HAS_ICON" >> $GITHUB_OUTPUT
+          echo "=== input/ ==="
+          ls -la input/ || echo "input/ مفقود"
+          test -f input/project.zip || { echo "project.zip مفقود"; exit 1; }
+          echo "=== حجم ZIP ==="
+          du -h input/project.zip
 
       - name: فك ضغط المشروع
         run: |
           mkdir -p www
           unzip -o input/project.zip -d www/
-          # إذا كان ZIP يحتوي مجلداً واحداً، انقل محتواه
-          if [ $(ls -1 www | wc -l) -eq 1 ] && [ -d "www/$(ls -1 www | head -1)" ]; then
+          # إذا ZIP فيه مجلد واحد فقط، ارفع محتواه
+          count=$(ls -1 www | wc -l)
+          if [ "$count" -eq 1 ] && [ -d "www/$(ls -1 www | head -1)" ]; then
             inner=$(ls -1 www | head -1)
             mv www/$inner/* www/ 2>/dev/null || true
             mv www/$inner/.* www/ 2>/dev/null || true
-            rmdir www/$inner
+            rmdir www/$inner 2>/dev/null || true
           fi
-          ls -la www/
+          ls -la www/ | head -30
+          test -f www/index.html || { echo "www/index.html مفقود"; exit 1; }
 
       - name: إعداد Node.js
         uses: actions/setup-node@v4
@@ -54,29 +70,25 @@ jobs:
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "${{ steps.cfg.outputs.APP_NAME }}" "com.example.app" --web-dir=www
+          npx cap init "${{ steps.cfg.outputs.SAFE_NAME }}" "com.example.${{ steps.cfg.outputs.SAFE_NAME }}" --web-dir=www
           npx cap add android
           npx cap sync android
-          
-          # الأيقونة إن وجدت
           if [ "${{ steps.cfg.outputs.HAS_ICON }}" = "true" ] && [ -f "input/icon.png" ]; then
-            # استبدال الأيقونات الافتراضية (المسارات تختلف حسب إصدار Capacitor)
             find android/app/src/main/res -name "ic_launcher*.png" -exec cp input/icon.png {} \;
           fi
-          
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: نسخ APK إلى مخرجات
+      - name: نسخ APK
         run: |
           mkdir -p output
-          cp android/app/build/outputs/apk/debug/app-debug.apk output/${{ steps.cfg.outputs.APP_NAME }}.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "output/${{ steps.cfg.outputs.SAFE_NAME }}.apk"
           ls -lh output/
 
-      - name: رفع APK كـ Artifact
+      - name: رفع APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.cfg.outputs.APP_NAME }}-apk
+          name: ${{ steps.cfg.outputs.SAFE_NAME }}-apk
           path: output/
           retention-days: 7
