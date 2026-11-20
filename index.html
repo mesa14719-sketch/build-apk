@@ -30,7 +30,7 @@
 
 <label>رابط مستودع المشروع</label>
 <input type="url" id="projectUrl" placeholder="https://github.com/username/my-web-app" />
-<div class="hint">المستودع يجب أن يحتوي على index.html في الجذر أو في مجلد فرعي</div>
+<div class="hint">ضع رابط المستودع فقط، بدون /tree/ أو /blob/</div>
 
 <label>اسم التطبيق</label>
 <input type="text" id="appName" placeholder="MyApp" />
@@ -40,10 +40,9 @@
 
 <label>مستودع البناء (يحتوي workflow)</label>
 <input type="url" id="builderUrl" placeholder="https://github.com/username/apk-builder" />
-<div class="hint">هذا المستودع يحتوي على build-apk.yml — أنشئه مرة واحدة</div>
 
 <label>GitHub Token (repo + workflow)</label>
-<input type="password" id="ghToken" placeholder="ghp_..." />
+<input type="password" id="ghToken" placeholder="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" />
 
 <button id="buildBtn" onclick="startBuild()">Build APK</button>
 <button id="downloadBtn" onclick="downloadArtifact()">تحميل APK (مضغوط)</button>
@@ -56,11 +55,25 @@ const downloadBtn = document.getElementById('downloadBtn');
 let ctx = null;
 
 function show(m, c) { statusEl.textContent = m; statusEl.className = c; }
+
+// أكثر صرامة: owner/repo فقط، يتجاهل أي مسار إضافي
 function parseRepo(url) {
-  const m = url.match(/(?:github\.com\/)?([^\/]+)\/([^\/]+?)(?:\.git)?$/);
-  if (!m) throw new Error('رابط غير صحيح');
-  return { owner: m[1], repo: m[2] };
+  const cleaned = url.replace(/^https?:\/\//, '').replace(/^www\./, '');
+  const parts = cleaned.split('/').filter(Boolean);
+  let owner, repo;
+  if (parts[0] === 'github.com') {
+    if (parts.length < 3) throw new Error('رابط المستودع ناقص');
+    owner = parts[1];
+    repo = parts[2].replace(/\.git$/, '');
+  } else {
+    if (parts.length < 2) throw new Error('صيغة الرابط غير صحيحة');
+    owner = parts[0];
+    repo = parts[1].replace(/\.git$/, '');
+  }
+  if (!owner || !repo) throw new Error('لم أستخرج owner/repo من الرابط');
+  return { owner, repo };
 }
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function fileToBase64(file) {
@@ -72,27 +85,49 @@ function fileToBase64(file) {
   });
 }
 
-async function uploadFile(owner, repo, token, path, b64) {
-  const api = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
-  let sha = null;
-  const g = await fetch(api, { headers: { Authorization: `token ${token}` } });
-  if (g.ok) sha = (await g.json()).sha;
-  const body = { message: `upload ${path}`, content: b64, branch: 'main' };
-  if (sha) body.sha = sha;
-  const res = await fetch(api, {
-    method: 'PUT',
-    headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+async function ghFetch(url, token, opts = {}) {
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github+json',
+      ...(opts.headers || {})
+    }
   });
-  if (!res.ok) throw new Error(`رفع ${path}: ${(await res.json()).message}`);
+  return res;
 }
 
-// جمع ملفات المشروع من المستودع وضغطها ZIP
+async function getDefaultBranch(owner, repo, token) {
+  const res = await ghFetch(`https://api.github.com/repos/${owner}/${repo}`, token);
+  if (!res.ok) throw new Error(`جلب المستودع: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.default_branch || 'main';
+}
+
+async function uploadFile(owner, repo, token, path, b64, branch) {
+  const api = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  let sha = null;
+  const g = await ghFetch(api, token);
+  if (g.ok) sha = (await g.json()).sha;
+  const body = { message: `upload ${path}`, content: b64, branch };
+  if (sha) body.sha = sha;
+  const res = await ghFetch(api, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`رفع ${path}: ${err.message || res.status} (قد يكون الحجم > 1MB)`);
+  }
+}
+
 async function collectRepoAsZip(owner, repo, token) {
-  // جلب الشجرة
-  const treeRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`,
-    { headers: { Authorization: `token ${token}` } }
+  const branch = await getDefaultBranch(owner, repo, token);
+
+  const treeRes = await ghFetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    token
   );
   if (!treeRes.ok) throw new Error(`جلب الشجرة: HTTP ${treeRes.status}`);
   const tree = await treeRes.json();
@@ -100,49 +135,66 @@ async function collectRepoAsZip(owner, repo, token) {
   const files = tree.tree.filter(t => t.type === 'blob' && !t.path.startsWith('.git/'));
   if (!files.length) throw new Error('المستودع فارغ');
 
-  show(`جمع ${files.length} ملفاً...`, 'info');
+  show(`جمع ${files.length} ملفاً (فرع: ${branch})...`, 'info');
   const zip = new JSZip();
 
   let i = 0;
   for (const f of files) {
     i++;
     show(`تنزيل ${i}/${files.length}: ${f.path}`, 'info');
-    const raw = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/${f.path}`);
-    if (!raw.ok) throw new Error(`تنزيل ${f.path} فشل`);
-    zip.file(f.path, await raw.blob());
+    // Contents API يعمل مع الخاص والعام، ويدعم الملفات الثنائية عبر download_url
+    const fileRes = await ghFetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(f.path).replace(/%2F/g, '/')}?ref=${branch}`,
+      token
+    );
+    if (!fileRes.ok) throw new Error(`تنزيل ${f.path} فشل: HTTP ${fileRes.status}`);
+    const fileData = await fileRes.json();
+    if (fileData.download_url) {
+      const raw = await fetch(fileData.download_url);
+      if (!raw.ok) throw new Error(`تنزيل محتوى ${f.path} فشل`);
+      zip.file(f.path, await raw.blob());
+    } else if (fileData.content) {
+      const bin = atob(fileData.content.replace(/\n/g, ''));
+      const arr = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+      zip.file(f.path, arr);
+    }
   }
 
-  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return { blob: await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), branch };
 }
 
 async function waitForRun(owner, repo, token, since) {
   for (let i = 0; i < 72; i++) {
     await sleep(5000);
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/actions/runs?event=repository_dispatch&per_page=10`,
-      { headers: { Authorization: `token ${token}` } }
+    const res = await ghFetch(
+      `https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=20`,
+      token
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const run = data.workflow_runs.find(r => new Date(r.created_at) >= since);
+    const run = data.workflow_runs.find(r =>
+      new Date(r.created_at) >= since &&
+      (r.event === 'repository_dispatch' || r.event === 'workflow_dispatch')
+    );
     if (!run) continue;
     if (run.status === 'completed') {
       if (run.conclusion === 'success') return run;
-      throw new Error(`البناء فشل: ${run.conclusion}`);
+      throw new Error(`البناء فشل: ${run.conclusion} — راجع https://github.com/${owner}/${repo}/actions/runs/${run.id}`);
     }
     show(`البناء: ${run.status}`, 'info');
   }
-  throw new Error('انتهت المهلة');
+  throw new Error('انتهت المهلة (6 دقائق)');
 }
 
 async function fetchArtifact(owner, repo, token, runId) {
-  const res = await fetch(
+  const res = await ghFetch(
     `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`,
-    { headers: { Authorization: `token ${token}` } }
+    token
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const d = await res.json();
-  if (!d.artifacts.length) throw new Error('لا يوجد APK');
+  if (!d.artifacts.length) throw new Error('لا يوجد APK في هذا البناء');
   return d.artifacts[0];
 }
 
@@ -165,8 +217,10 @@ async function startBuild() {
     const proj = parseRepo(projUrl);
     const builder = parseRepo(builderUrl);
 
-    // 1. جمع ملفات المشروع
-    const zipBlob = await collectRepoAsZip(proj.owner, proj.repo, token);
+    const builderBranch = await getDefaultBranch(builder.owner, builder.repo, token);
+
+    // 1. جمع المشروع
+    const { blob: zipBlob } = await collectRepoAsZip(proj.owner, proj.repo, token);
     show('ضغط المشروع...', 'info');
     const zipB64 = await new Promise((res, rej) => {
       const r = new FileReader();
@@ -175,27 +229,30 @@ async function startBuild() {
       r.readAsDataURL(zipBlob);
     });
 
-    // 2. رفع ZIP للمستودع الباني
-    show('رفع المشروع للمستودع الباني...', 'info');
-    await uploadFile(builder.owner, builder.repo, token, 'input/project.zip', zipB64);
+    // 2. رفع ZIP
+    show('رفع المشروع...', 'info');
+    await uploadFile(builder.owner, builder.repo, token, 'input/project.zip', zipB64, builderBranch);
 
     // 3. رفع الأيقونة
     let hasIcon = false;
     if (iconFile) {
       show('رفع الأيقونة...', 'info');
-      await uploadFile(builder.owner, builder.repo, token, 'input/icon.png', await fileToBase64(iconFile));
+      await uploadFile(builder.owner, builder.repo, token, 'input/icon.png', await fileToBase64(iconFile), builderBranch);
       hasIcon = true;
     }
 
-    // 4. إطلاق البناء
+    // 4. dispatch
     const since = new Date();
     show('إطلاق البناء...', 'info');
-    const res = await fetch(`https://api.github.com/repos/${builder.owner}/${builder.repo}/dispatches`, {
+    const res = await ghFetch(`https://api.github.com/repos/${builder.owner}/${builder.repo}/dispatches`, token, {
       method: 'POST',
-      headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.github+json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event_type: 'build-apk', client_payload: { app_name: appName, has_icon: hasIcon } })
     });
-    if (res.status !== 204) throw new Error(`dispatch: HTTP ${res.status}`);
+    if (res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`dispatch: HTTP ${res.status} — ${err.message || 'راجع صلاحيات التوكن (repo + workflow)'}`);
+    }
 
     // 5. الانتظار
     const run = await waitForRun(builder.owner, builder.repo, token, since);
@@ -218,9 +275,9 @@ async function downloadArtifact() {
   if (!ctx) return;
   try {
     show('تنزيل...', 'info');
-    const res = await fetch(
+    const res = await ghFetch(
       `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/artifacts/${ctx.artifactId}/zip`,
-      { headers: { Authorization: `token ${ctx.token}` } }
+      ctx.token
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
