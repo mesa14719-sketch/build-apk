@@ -1,0 +1,82 @@
+name: Build APK from Uploaded Project
+
+on:
+  repository_dispatch:
+    types: [build-apk]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: قراءة المدخلات
+        id: cfg
+        run: |
+          echo "APP_NAME=${{ github.event.client_payload.app_name }}" >> $GITHUB_OUTPUT
+          echo "HAS_ICON=${{ github.event.client_payload.has_icon }}" >> $GITHUB_OUTPUT
+
+      - name: فك ضغط المشروع
+        run: |
+          mkdir -p www
+          unzip -o input/project.zip -d www/
+          # إذا كان ZIP يحتوي مجلداً واحداً، انقل محتواه
+          if [ $(ls -1 www | wc -l) -eq 1 ] && [ -d "www/$(ls -1 www | head -1)" ]; then
+            inner=$(ls -1 www | head -1)
+            mv www/$inner/* www/ 2>/dev/null || true
+            mv www/$inner/.* www/ 2>/dev/null || true
+            rmdir www/$inner
+          fi
+          ls -la www/
+
+      - name: إعداد Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: إعداد Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: إعداد Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: تثبيت Capacitor وبناء APK
+        run: |
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init "${{ steps.cfg.outputs.APP_NAME }}" "com.example.app" --web-dir=www
+          npx cap add android
+          npx cap sync android
+          
+          # الأيقونة إن وجدت
+          if [ "${{ steps.cfg.outputs.HAS_ICON }}" = "true" ] && [ -f "input/icon.png" ]; then
+            # استبدال الأيقونات الافتراضية (المسارات تختلف حسب إصدار Capacitor)
+            find android/app/src/main/res -name "ic_launcher*.png" -exec cp input/icon.png {} \;
+          fi
+          
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: نسخ APK إلى مخرجات
+        run: |
+          mkdir -p output
+          cp android/app/build/outputs/apk/debug/app-debug.apk output/${{ steps.cfg.outputs.APP_NAME }}.apk
+          ls -lh output/
+
+      - name: رفع APK كـ Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.cfg.outputs.APP_NAME }}-apk
+          path: output/
+          retention-days: 7
