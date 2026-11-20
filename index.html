@@ -2,79 +2,91 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>APK Builder — من مستودع إلى APK</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>App Builder</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 580px; margin: 40px auto; padding: 0 16px; background: #0d1117; color: #c9d1d9; }
-  h2 { font-size: 20px; }
-  label { display: block; margin-top: 16px; font-size: 14px; color: #8b949e; }
-  input[type="text"], input[type="password"], input[type="url"] {
-    width: 100%; padding: 10px; margin-top: 4px; background: #161b22; border: 1px solid #30363d;
-    border-radius: 6px; color: #c9d1d9; font-size: 14px; box-sizing: border-box;
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 16px; background: #0d1117; color: #c9d1d9;
+    min-height: 100vh; user-select: none; -webkit-user-select: none;
   }
-  input[type="file"] { margin-top: 4px; color: #8b949e; }
-  button { margin-top: 20px; width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; color: #fff; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #8b949e; font-size: 13px; margin: 0 0 20px; }
+  label { display: block; margin-top: 14px; font-size: 13px; color: #8b949e; }
+  input[type="text"], input[type="password"], input[type="url"] {
+    width: 100%; padding: 12px; margin-top: 4px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    color: #c9d1d9; font-size: 15px; font-family: inherit;
+  }
+  input:focus { outline: none; border-color: #1f6feb; }
+  input[type="file"] { margin-top: 4px; color: #8b949e; font-size: 13px; }
+  button {
+    margin-top: 20px; width: 100%; padding: 14px;
+    border: none; border-radius: 8px; font-size: 16px;
+    cursor: pointer; color: #fff; font-family: inherit;
+  }
   #buildBtn { background: #238636; }
   #downloadBtn { background: #1f6feb; display: none; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  #status { margin-top: 16px; padding: 12px; border-radius: 6px; font-size: 14px; display: none; }
-  .ok { background: #1a2e1a; border: 1px solid #238636; color: #3fb950; display: block !important; }
-  .err { background: #2e1a1a; border: 1px solid #da3633; color: #f85149; display: block !important; }
-  .info { background: #161b22; border: 1px solid #30363d; color: #8b949e; display: block !important; }
-  .hint { font-size: 12px; color: #484f58; margin-top: 2px; }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  #status {
+    margin-top: 16px; padding: 12px; border-radius: 8px;
+    font-size: 13px; display: none; word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .ok { background: #1a2e1a; border: 1px solid #238636; color: #3fb950; display: block; }
+  .err { background: #2e1a1a; border: 1px solid #da3633; color: #f85149; display: block; }
+  .info { background: #161b22; border: 1px solid #30363d; color: #8b949e; display: block; }
+  .hint { font-size: 11px; color: #484f58; margin-top: 3px; }
 </style>
 </head>
 <body>
 
-<h2>من مستودع GitHub إلى APK</h2>
+<h1>App Builder</h1>
+<p class="sub">اختر مستودعاً، اسمَ تطبيق، صورة، ثم ابنِ</p>
 
 <label>رابط مستودع المشروع</label>
-<input type="url" id="projectUrl" placeholder="https://github.com/username/my-web-app" />
-<div class="hint">ضع رابط المستودع فقط، بدون /tree/ أو /blob/</div>
+<input type="url" id="projectUrl" placeholder="https://github.com/username/my-app" />
+<div class="hint">يجب أن يحتوي على index.html في الجذر أو مجلد فرعي</div>
 
 <label>اسم التطبيق</label>
 <input type="text" id="appName" placeholder="MyApp" />
 
-<label>صورة التطبيق</label>
+<label>صورة التطبيق (اختياري)</label>
 <input type="file" id="appIcon" accept="image/*" />
 
-<label>مستودع البناء (يحتوي workflow)</label>
-<input type="url" id="builderUrl" placeholder="https://github.com/username/apk-builder" />
-
-<label>GitHub Token (repo + workflow)</label>
-<input type="password" id="ghToken" placeholder="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" />
+<label>GitHub Token</label>
+<input type="password" id="ghToken" placeholder="ghp_... أو github_pat_..." />
+<div class="hint">يُستخدم لهذه الجلسة فقط. لا يُخزّن.</div>
 
 <button id="buildBtn" onclick="startBuild()">Build APK</button>
-<button id="downloadBtn" onclick="downloadArtifact()">تحميل APK (مضغوط)</button>
+<button id="downloadBtn" onclick="downloadArtifact()">تحميل APK</button>
 <div id="status"></div>
 
 <script>
+const BUILDER_OWNER = 'mesa14719-sketch';
+const BUILDER_REPO  = 'build-apk';
+
 const statusEl = document.getElementById('status');
 const buildBtn = document.getElementById('buildBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 let ctx = null;
 
 function show(m, c) { statusEl.textContent = m; statusEl.className = c; }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// أكثر صرامة: owner/repo فقط، يتجاهل أي مسار إضافي
 function parseRepo(url) {
   const cleaned = url.replace(/^https?:\/\//, '').replace(/^www\./, '');
   const parts = cleaned.split('/').filter(Boolean);
-  let owner, repo;
   if (parts[0] === 'github.com') {
     if (parts.length < 3) throw new Error('رابط المستودع ناقص');
-    owner = parts[1];
-    repo = parts[2].replace(/\.git$/, '');
-  } else {
-    if (parts.length < 2) throw new Error('صيغة الرابط غير صحيحة');
-    owner = parts[0];
-    repo = parts[1].replace(/\.git$/, '');
+    return { owner: parts[1], repo: parts[2].replace(/\.git$/, '') };
   }
-  if (!owner || !repo) throw new Error('لم أستخرج owner/repo من الرابط');
-  return { owner, repo };
+  if (parts.length < 2) throw new Error('صيغة الرابط غير صحيحة');
+  return { owner: parts[0], repo: parts[1].replace(/\.git$/, '') };
 }
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function fileToBase64(file) {
   return new Promise((res, rej) => {
@@ -86,7 +98,7 @@ function fileToBase64(file) {
 }
 
 async function ghFetch(url, token, opts = {}) {
-  const res = await fetch(url, {
+  return fetch(url, {
     ...opts,
     headers: {
       Authorization: `token ${token}`,
@@ -94,14 +106,12 @@ async function ghFetch(url, token, opts = {}) {
       ...(opts.headers || {})
     }
   });
-  return res;
 }
 
 async function getDefaultBranch(owner, repo, token) {
   const res = await ghFetch(`https://api.github.com/repos/${owner}/${repo}`, token);
   if (!res.ok) throw new Error(`جلب المستودع: HTTP ${res.status}`);
-  const data = await res.json();
-  return data.default_branch || 'main';
+  return (await res.json()).default_branch || 'main';
 }
 
 async function uploadFile(owner, repo, token, path, b64, branch) {
@@ -118,36 +128,31 @@ async function uploadFile(owner, repo, token, path, b64, branch) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`رفع ${path}: ${err.message || res.status} (قد يكون الحجم > 1MB)`);
+    throw new Error(`رفع ${path}: ${err.message || res.status}`);
   }
 }
 
 async function collectRepoAsZip(owner, repo, token) {
   const branch = await getDefaultBranch(owner, repo, token);
-
   const treeRes = await ghFetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
-    token
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, token
   );
   if (!treeRes.ok) throw new Error(`جلب الشجرة: HTTP ${treeRes.status}`);
   const tree = await treeRes.json();
-
   const files = tree.tree.filter(t => t.type === 'blob' && !t.path.startsWith('.git/'));
   if (!files.length) throw new Error('المستودع فارغ');
 
-  show(`جمع ${files.length} ملفاً (فرع: ${branch})...`, 'info');
+  show(`جمع ${files.length} ملفاً (${branch})...`, 'info');
   const zip = new JSZip();
 
-  let i = 0;
-  for (const f of files) {
-    i++;
-    show(`تنزيل ${i}/${files.length}: ${f.path}`, 'info');
-    // Contents API يعمل مع الخاص والعام، ويدعم الملفات الثنائية عبر download_url
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    show(`تنزيل ${i+1}/${files.length}: ${f.path}`, 'info');
     const fileRes = await ghFetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(f.path).replace(/%2F/g, '/')}?ref=${branch}`,
       token
     );
-    if (!fileRes.ok) throw new Error(`تنزيل ${f.path} فشل: HTTP ${fileRes.status}`);
+    if (!fileRes.ok) throw new Error(`تنزيل ${f.path}: HTTP ${fileRes.status}`);
     const fileData = await fileRes.json();
     if (fileData.download_url) {
       const raw = await fetch(fileData.download_url);
@@ -160,16 +165,14 @@ async function collectRepoAsZip(owner, repo, token) {
       zip.file(f.path, arr);
     }
   }
-
-  return { blob: await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), branch };
+  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
 
-async function waitForRun(owner, repo, token, since) {
-  for (let i = 0; i < 72; i++) {
+async function waitForRun(token, since) {
+  for (let i = 0; i < 90; i++) {
     await sleep(5000);
     const res = await ghFetch(
-      `https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=20`,
-      token
+      `https://api.github.com/repos/${BUILDER_OWNER}/${BUILDER_REPO}/actions/runs?per_page=20`, token
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -180,33 +183,31 @@ async function waitForRun(owner, repo, token, since) {
     if (!run) continue;
     if (run.status === 'completed') {
       if (run.conclusion === 'success') return run;
-      throw new Error(`البناء فشل: ${run.conclusion} — راجع https://github.com/${owner}/${repo}/actions/runs/${run.id}`);
+      throw new Error(`البناء فشل: ${run.conclusion} — ${run.html_url}`);
     }
     show(`البناء: ${run.status}`, 'info');
   }
-  throw new Error('انتهت المهلة (6 دقائق)');
+  throw new Error('انتهت المهلة (7.5 دقائق)');
 }
 
-async function fetchArtifact(owner, repo, token, runId) {
+async function fetchArtifact(token, runId) {
   const res = await ghFetch(
-    `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`,
-    token
+    `https://api.github.com/repos/${BUILDER_OWNER}/${BUILDER_REPO}/actions/runs/${runId}/artifacts`, token
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const d = await res.json();
-  if (!d.artifacts.length) throw new Error('لا يوجد APK في هذا البناء');
+  if (!d.artifacts.length) throw new Error('لا يوجد APK');
   return d.artifacts[0];
 }
 
 async function startBuild() {
   const projUrl = document.getElementById('projectUrl').value.trim();
   const appName = document.getElementById('appName').value.trim();
-  const builderUrl = document.getElementById('builderUrl').value.trim();
   const token = document.getElementById('ghToken').value.trim();
   const iconFile = document.getElementById('appIcon').files[0];
 
-  if (!projUrl || !appName || !builderUrl || !token) {
-    show('املأ كل الحقول', 'err');
+  if (!projUrl || !appName || !token) {
+    show('املأ رابط المستودع، اسم التطبيق، والتوكن', 'err');
     return;
   }
 
@@ -215,12 +216,9 @@ async function startBuild() {
 
   try {
     const proj = parseRepo(projUrl);
-    const builder = parseRepo(builderUrl);
+    const builderBranch = await getDefaultBranch(BUILDER_OWNER, BUILDER_REPO, token);
 
-    const builderBranch = await getDefaultBranch(builder.owner, builder.repo, token);
-
-    // 1. جمع المشروع
-    const { blob: zipBlob } = await collectRepoAsZip(proj.owner, proj.repo, token);
+    const zipBlob = await collectRepoAsZip(proj.owner, proj.repo, token);
     show('ضغط المشروع...', 'info');
     const zipB64 = await new Promise((res, rej) => {
       const r = new FileReader();
@@ -229,39 +227,33 @@ async function startBuild() {
       r.readAsDataURL(zipBlob);
     });
 
-    // 2. رفع ZIP
-    show('رفع المشروع...', 'info');
-    await uploadFile(builder.owner, builder.repo, token, 'input/project.zip', zipB64, builderBranch);
+    show('رفع ZIP...', 'info');
+    await uploadFile(BUILDER_OWNER, BUILDER_REPO, token, 'input/project.zip', zipB64, builderBranch);
 
-    // 3. رفع الأيقونة
     let hasIcon = false;
     if (iconFile) {
       show('رفع الأيقونة...', 'info');
-      await uploadFile(builder.owner, builder.repo, token, 'input/icon.png', await fileToBase64(iconFile), builderBranch);
+      await uploadFile(BUILDER_OWNER, BUILDER_REPO, token, 'input/icon.png', await fileToBase64(iconFile), builderBranch);
       hasIcon = true;
     }
 
-    // 4. dispatch
     const since = new Date();
     show('إطلاق البناء...', 'info');
-    const res = await ghFetch(`https://api.github.com/repos/${builder.owner}/${builder.repo}/dispatches`, token, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type: 'build-apk', client_payload: { app_name: appName, has_icon: hasIcon } })
-    });
+    const res = await ghFetch(
+      `https://api.github.com/repos/${BUILDER_OWNER}/${BUILDER_REPO}/dispatches`, token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_type: 'build-apk', client_payload: { app_name: appName, has_icon: hasIcon } })
+      }
+    );
     if (res.status !== 204) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`dispatch: HTTP ${res.status} — ${err.message || 'راجع صلاحيات التوكن (repo + workflow)'}`);
+      throw new Error(`dispatch: HTTP ${res.status} — ${err.message || 'راجع صلاحيات التوكن'}`);
     }
 
-    // 5. الانتظار
-    const run = await waitForRun(builder.owner, builder.repo, token, since);
-
-    // 6. جلب APK
-    show('جلب APK...', 'info');
-    const art = await fetchArtifact(builder.owner, builder.repo, token, run.id);
-    ctx = { owner: builder.owner, repo: builder.repo, token, artifactId: art.id };
-
+    const run = await waitForRun(token, since);
+    const art = await fetchArtifact(token, run.id);
+    ctx = { token, artifactId: art.id, name: appName };
     show(`جاهز: ${art.name} (${(art.size_in_bytes/1024/1024).toFixed(1)} MB)`, 'ok');
     downloadBtn.style.display = 'block';
   } catch (e) {
@@ -276,20 +268,19 @@ async function downloadArtifact() {
   try {
     show('تنزيل...', 'info');
     const res = await ghFetch(
-      `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/artifacts/${ctx.artifactId}/zip`,
-      ctx.token
+      `https://api.github.com/repos/${BUILDER_OWNER}/${BUILDER_REPO}/actions/artifacts/${ctx.artifactId}/zip`, ctx.token
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'app-apk.zip';
+    a.download = `${ctx.name}-apk.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    show('تم التنزيل. فك الضغط وثبّت APK.', 'ok');
+    show('تم التنزيل. فك الضغط، ثبّت APK.', 'ok');
   } catch (e) {
     show(e.message, 'err');
   }
