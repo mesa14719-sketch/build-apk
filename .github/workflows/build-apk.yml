@@ -26,7 +26,6 @@ jobs:
           echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
           echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_OUTPUT
           echo "HAS_ICON=$HAS_ICON" >> $GITHUB_OUTPUT
-          echo "app_name=$APP_NAME safe=$SAFE_NAME has_icon=$HAS_ICON"
 
       - name: تحضير المشروع
         run: |
@@ -41,15 +40,10 @@ jobs:
               rmdir www/$inner 2>/dev/null || true
             fi
           else
-            cat > www/index.html <<'EOF'
-          <!DOCTYPE html>
-          <html lang="ar" dir="rtl">
-          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyApp</title>
-          <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d1117;color:#c9d1d9}h1{font-size:28px}</style></head>
-          <body><div style="text-align:center"><h1>مرحباً من MyApp</h1><p>مشروع تجريبي</p></div></body></html>
-          EOF
+            echo "لا يوجد project.zip — إيقاف"
+            exit 1
           fi
-          test -f www/index.html || { echo "index.html missing"; ls -laR www/ | head -50; exit 1; }
+          test -f www/index.html || { echo "www/index.html مفقود"; ls -laR www/ | head -30; exit 1; }
           ls -la www/ | head -20
 
       - name: إعداد Node.js 20
@@ -76,7 +70,6 @@ jobs:
           npx cap add android
           npx cap sync android
 
-          # فرض Java 21 و SDK 35 في gradle
           cd android
           cat >> variables.gradle <<'EOF'
 
@@ -87,9 +80,8 @@ jobs:
           }
           EOF
 
-          # تأكيد compileOptions
           python3 - <<'PY'
-          import re, pathlib
+          import pathlib
           p = pathlib.Path('app/build.gradle')
           s = p.read_text()
           if 'compileOptions' not in s:
@@ -100,7 +92,6 @@ jobs:
               }
           ''', 1)
           p.write_text(s)
-          print("compileOptions patched")
           PY
 
           if [ "${{ steps.cfg.outputs.HAS_ICON }}" = "true" ] && [ -f "../input/icon.png" ]; then
