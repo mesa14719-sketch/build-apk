@@ -76,48 +76,50 @@ jobs:
         run: |
           cd "$ROOT"
 
-          # 1. حذف مسار الجافا الثابت
+          # ===== 1. حذف مسار الجافا الثابت =====
           find . -name "gradle.properties" -type f -exec sed -i '/org.gradle.java.home/d' {} \;
 
-          # 2. رفع Gradle إلى 9.5.0 (متوافق مع AGP 9.x)
+          # ===== 2. رفع Gradle إلى 9.5.0 =====
           if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
             sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-9.5.0-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-            echo "Gradle updated:"
+            echo "=== gradle-wrapper.properties ==="
             cat android/gradle/wrapper/gradle-wrapper.properties
           fi
 
-          # 3. رفع Android Gradle Plugin إلى 9.3.1
-          find android -name "*.gradle" -o -name "*.gradle.kts" | while read file; do
-            sed -i 's/id[[:space:]]*"com.android.application"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.application" version "9.3.1"/g' "$file"
-            sed -i 's/id[[:space:]]*"com.android.library"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.library" version "9.3.1"/g' "$file"
-            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:9.3.1/g" "$file"
+          # ===== 3. رفع AGP إلى 9.3.1 (في كل الملفات المحتملة) =====
+          for f in android/settings.gradle android/settings.gradle.kts android/build.gradle android/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/id[[:space:]]*"com.android.application"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.application" version "9.3.1"/g' "$f"
+              sed -i 's/id[[:space:]]*"com.android.library"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.library" version "9.3.1"/g' "$f"
+              sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:9.3.1/g" "$f"
+            fi
           done
 
-          # 4. إصلاح ProGuard (استبدال proguard-android.txt بالنسخة المحسّنة)
-          if [ -f android/app/build.gradle ]; then
-            sed -i "s|getDefaultProguardFile('proguard-android.txt')|getDefaultProguardFile('proguard-android-optimize.txt')|g" android/app/build.gradle
-            echo "=== proguard config ==="
-            grep -n "proguard" android/app/build.gradle || true
-          fi
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's|getDefaultProguardFile("proguard-android.txt")|getDefaultProguardFile("proguard-android-optimize.txt")|g' android/app/build.gradle.kts
-            grep -n "proguard" android/app/build.gradle.kts || true
-          fi
+          # ===== 4. إصلاح ProGuard =====
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i "s|getDefaultProguardFile('proguard-android.txt')|getDefaultProguardFile('proguard-android-optimize.txt')|g" "$f"
+              sed -i 's|getDefaultProguardFile("proguard-android.txt")|getDefaultProguardFile("proguard-android-optimize.txt")|g' "$f"
+            fi
+          done
 
-          # 5. تعطيل DSL الجديد لـ AGP 9 و Kotlin المدمج (حل مؤقت لتوافق Flutter)
-          if [ -f android/gradle.properties ]; then
-            grep -q "android.newDsl" android/gradle.properties || echo "android.newDsl=false" >> android/gradle.properties
-            grep -q "android.builtInKotlin" android/gradle.properties || echo "android.builtInKotlin=false" >> android/gradle.properties
-            echo "=== gradle.properties ==="
-            cat android/gradle.properties
+          # ===== 5. تعطيل DSL الجديد لـ AGP 9 و Kotlin المدمج =====
+          GP="android/gradle.properties"
+          if [ ! -f "$GP" ]; then
+            touch "$GP"
           fi
+          grep -q "^android.newDsl=" "$GP" && sed -i 's|^android.newDsl=.*|android.newDsl=false|' "$GP" || echo "android.newDsl=false" >> "$GP"
+          grep -q "^android.builtInKotlin=" "$GP" && sed -i 's|^android.builtInKotlin=.*|android.builtInKotlin=false|' "$GP" || echo "android.builtInKotlin=false" >> "$GP"
+          echo "=== gradle.properties ==="
+          cat "$GP"
 
-          # 6. طباعة ملف build.gradle الجذري للتشخيص
-          echo "=== android/build.gradle ==="
-          cat android/build.gradle 2>/dev/null || true
+          # ===== 6. طباعة الملفات للتشخيص =====
           echo "=== android/settings.gradle ==="
           cat android/settings.gradle 2>/dev/null || cat android/settings.gradle.kts 2>/dev/null || true
+          echo "=== android/build.gradle ==="
+          cat android/build.gradle 2>/dev/null || cat android/build.gradle.kts 2>/dev/null || true
 
+          # ===== 7. البناء =====
           flutter pub get
           flutter build apk --release --android-skip-build-dependency-validation
 
