@@ -86,7 +86,7 @@ jobs:
             cat android/gradle/wrapper/gradle-wrapper.properties
           fi
 
-          # 3. رفع Android Gradle Plugin إلى 9.3.1 (أحدث إصدار مستقر)
+          # 3. رفع Android Gradle Plugin إلى 9.3.1
           find android -name "*.gradle" -o -name "*.gradle.kts" | while read file; do
             sed -i 's/id[[:space:]]*"com.android.application"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.application" version "9.3.1"/g' "$file"
             sed -i 's/id[[:space:]]*"com.android.library"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.library" version "9.3.1"/g' "$file"
@@ -104,7 +104,18 @@ jobs:
             grep -n "proguard" android/app/build.gradle.kts || true
           fi
 
-          echo "=== settings.gradle ==="
+          # 5. تعطيل DSL الجديد لـ AGP 9 و Kotlin المدمج (حل مؤقت لتوافق Flutter)
+          if [ -f android/gradle.properties ]; then
+            grep -q "android.newDsl" android/gradle.properties || echo "android.newDsl=false" >> android/gradle.properties
+            grep -q "android.builtInKotlin" android/gradle.properties || echo "android.builtInKotlin=false" >> android/gradle.properties
+            echo "=== gradle.properties ==="
+            cat android/gradle.properties
+          fi
+
+          # 6. طباعة ملف build.gradle الجذري للتشخيص
+          echo "=== android/build.gradle ==="
+          cat android/build.gradle 2>/dev/null || true
+          echo "=== android/settings.gradle ==="
           cat android/settings.gradle 2>/dev/null || cat android/settings.gradle.kts 2>/dev/null || true
 
           flutter pub get
