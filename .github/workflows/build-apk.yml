@@ -76,8 +76,15 @@ jobs:
         run: |
           cd "$ROOT"
           
-          # إزالة مسار الجافا الثابت اللي يسبب المشكلة
+          # 1. حذف مسار الجافا الثابت
           find . -name "gradle.properties" -type f -exec sed -i '/org.gradle.java.home/d' {} \;
+          
+          # 2. رفع نسخة Gradle إلى 9.3.1
+          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+            sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+            echo "تم تحديث Gradle:"
+            cat android/gradle/wrapper/gradle-wrapper.properties
+          fi
           
           flutter pub get
           flutter build apk --release
