@@ -35,7 +35,6 @@ jobs:
             echo "ما لقيت أي ZIP"; exit 1
           fi
 
-          # نبحث عن مجلد فيه pubspec.yaml (مشروع Flutter)
           ROOT=""
           if [ -f "project/pubspec.yaml" ]; then
             ROOT="project"
@@ -48,14 +47,13 @@ jobs:
           fi
 
           if [ -z "$ROOT" ]; then
-            echo "ما لقيت pubspec.yaml (مو مشروع Flutter؟)"
+            echo "ما لقيت pubspec.yaml"
             find project -maxdepth 3 -type f | head -50
             exit 1
           fi
 
           echo "ROOT=$ROOT" >> $GITHUB_ENV
           echo "جذر المشروع: $ROOT"
-          ls -la "$ROOT"
 
       - name: إعداد Java 17
         uses: actions/setup-java@v4
@@ -77,6 +75,10 @@ jobs:
       - name: بناء APK
         run: |
           cd "$ROOT"
+          
+          # إزالة مسار الجافا الثابت اللي يسبب المشكلة
+          find . -name "gradle.properties" -type f -exec sed -i '/org.gradle.java.home/d' {} \;
+          
           flutter pub get
           flutter build apk --release
 
