@@ -75,33 +75,45 @@ jobs:
       - name: بناء APK
         run: |
           cd "$ROOT"
-          
-          # 1. حذف مسارات الجافا الثابتة
+
+          # 1. حذف مسار الجافا الثابت
           find . -name "gradle.properties" -type f -exec sed -i '/org.gradle.java.home/d' {} \;
-          find . -name "gradle.properties" -type f -exec sed -i '/org.gradle.java.installations.paths/d' {} \;
-          
-          # 2. رفع Gradle إلى 9.3.1
+
+          # 2. رفع Gradle إلى 9.5.0 (متوافق مع AGP 9.x)
           if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
-            sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-            echo "=== Gradle Wrapper ==="
+            sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-9.5.0-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+            echo "Gradle updated:"
             cat android/gradle/wrapper/gradle-wrapper.properties
           fi
-          
-          # 3. رفع Android Gradle Plugin إلى 9.1.1 (هذا هو المهم)
-          if [ -f android/settings.gradle ]; then
-            sed -i "s/id \"com.android.application\" version '8.11.1' apply false/id \"com.android.application\" version '9.1.1' apply false/" android/settings.gradle
-            sed -i 's/id "com.android.application" version "8.11.1" apply false/id "com.android.application" version "9.1.1" apply false/' android/settings.gradle
-            echo "=== settings.gradle بعد التعديل ==="
-            cat android/settings.gradle
+
+          # 3. رفع Android Gradle Plugin إلى 9.3.1 (أحدث إصدار مستقر)
+          find android -name "*.gradle" -o -name "*.gradle.kts" | while read file; do
+            sed -i 's/id[[:space:]]*"com.android.application"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.application" version "9.3.1"/g' "$file"
+            sed -i 's/id[[:space:]]*"com.android.library"[[:space:]]*version[[:space:]]*"[0-9.]*"/id "com.android.library" version "9.3.1"/g' "$file"
+            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:9.3.1/g" "$file"
+          done
+
+          # 4. إصلاح ProGuard (استبدال proguard-android.txt بالنسخة المحسّنة)
+          if [ -f android/app/build.gradle ]; then
+            sed -i "s|getDefaultProguardFile('proguard-android.txt')|getDefaultProguardFile('proguard-android-optimize.txt')|g" android/app/build.gradle
+            echo "=== proguard config ==="
+            grep -n "proguard" android/app/build.gradle || true
           fi
-          
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i 's|getDefaultProguardFile("proguard-android.txt")|getDefaultProguardFile("proguard-android-optimize.txt")|g' android/app/build.gradle.kts
+            grep -n "proguard" android/app/build.gradle.kts || true
+          fi
+
+          echo "=== settings.gradle ==="
+          cat android/settings.gradle 2>/dev/null || cat android/settings.gradle.kts 2>/dev/null || true
+
           flutter pub get
-          flutter build apk --release
+          flutter build apk --release --android-skip-build-dependency-validation
 
       - name: نسخ APK
         run: |
           mkdir -p output
-          find "\( ROOT/build/app/outputs" -name "*.apk" -exec cp {} "output/ \){{ steps.cfg.outputs.SAFE_NAME }}.apk" \;
+          find "$ROOT/build/app/outputs" -name "*.apk" -exec cp {} "output/${{ steps.cfg.outputs.SAFE_NAME }}.apk" \;
           ls -lh output/
           test -f "output/${{ steps.cfg.outputs.SAFE_NAME }}.apk" || { echo "ما انتج APK"; exit 1; }
 
